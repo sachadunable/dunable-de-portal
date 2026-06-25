@@ -1,0 +1,16 @@
+{
+  "name": "dunable-de-dealer-portal",
+  "version": "1.0.0",
+  "description": "Dunable DE dealer portal and Shopify sync server",
+  "main": "airtable-to-shopify-de.js",
+  "scripts": {
+    "start": "node airtable-to-shopify-de.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.0.0",
+    "node-fetch": "^2.7.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
