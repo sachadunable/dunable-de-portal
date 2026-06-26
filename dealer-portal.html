@@ -72,9 +72,10 @@
     .header-left .eyebrow { font-size: 10px; font-weight: 700; letter-spacing: 0.3em; color: var(--accent); text-transform: uppercase; margin-bottom: 4px; }
     .header-left .title { font-size: 18px; font-weight: 600; }
     .header-left .date { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
-    .header-right { text-align: right; font-size: 12px; color: var(--text-dim); line-height: 1.8; }
-    .header-right a { color: var(--accent); text-decoration: none; }
-    .header-right a:hover { text-decoration: underline; }
+    .header-center { flex: 1; text-align: center; font-size: 12px; color: var(--text-dim); line-height: 1.8; }
+    .header-center a { color: var(--accent); text-decoration: none; }
+    .header-center a:hover { text-decoration: underline; }
+    .header-right { display: flex; align-items: center; }
 
     .btn-download {
       flex-shrink: 0; padding: 10px 18px;
@@ -408,13 +409,15 @@
       <div class="title" style="margin-top:10px">DE Series — Dealer Price List</div>
       <div class="date" id="hdr-date"></div>
     </div>
-    <div class="header-right">
+    <div class="header-center">
       <div style="color:var(--gold);font-weight:700;font-size:26px;line-height:1.25;margin-bottom:8px">Now place orders directly<br>through this portal!<br>Quantity discounts applied automatically.</div>
       For questions: <a href="mailto:jordan@dunableguitars.com">jordan@dunableguitars.com</a> · <a href="mailto:contact@dunableguitars.com">contact@dunableguitars.com</a>
     </div>
-    <button class="btn-download" id="btn-download" onclick="downloadPriceList()" style="display:none">
-      ↓ Download .XLS Price List
-    </button>
+    <div class="header-right">
+      <button class="btn-download" id="btn-download" onclick="downloadPriceList()" style="display:none">
+        ↓ Download .XLS Price List
+      </button>
+    </div>
   </header>
 
   <div class="discount-bar">
@@ -502,7 +505,7 @@
   function checkPw() {
     const val = document.getElementById('pw').value;
     if (val === PW) {
-      sessionStorage.setItem('dp-auth', '1');
+      sessionStorage.setItem('dp-auth', val); // store actual password for API calls
       document.getElementById('gate').style.display = 'none';
       document.getElementById('portal').style.display = 'block';
       init();
@@ -517,7 +520,8 @@
   }
 
   (function bootAuth() {
-    if (sessionStorage.getItem('dp-auth') === '1') {
+    const stored = sessionStorage.getItem('dp-auth');
+    if (stored === PW) {
       document.getElementById('gate').style.display = 'none';
       document.getElementById('portal').style.display = 'block';
       init();
@@ -534,7 +538,8 @@
   // ── LOAD ──────────────────────────────────────────────────────────
   async function loadProducts() {
     try {
-      const res = await fetch('/api/dealer-products');
+      const pw  = sessionStorage.getItem('dp-auth') || PW;
+      const res = await fetch('/api/dealer-products?key=' + encodeURIComponent(pw));
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'Server error ' + res.status }));
         throw new Error(err.error || 'Server error ' + res.status);
@@ -759,8 +764,11 @@
   function checkout() {
     const vids = Object.keys(cart);
     if (!vids.length) return;
-    const items = vids.map(v => `${v}:${cart[v].qty}`).join(',');
-    const url = `https://dunable-de.com/cart/${items}`;
+    const totalQty = vids.reduce((s, v) => s + cart[v].qty, 0);
+    const isBulk   = totalQty >= 8;
+    const discount = isBulk ? 'DEALER36' : 'DEALER30';
+    const items    = vids.map(v => `${v}:${cart[v].qty}`).join(',');
+    const url      = `https://dunable-de.com/cart/${items}?discount=${discount}`;
     window.open(url, '_blank');
   }
 
