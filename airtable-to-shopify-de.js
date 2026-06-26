@@ -39,6 +39,21 @@ const DEFAULT_VENDOR       = "Dunable Guitars";
 const DEFAULT_PRODUCT_TYPE = "Electric Guitar";
 
 const PORT = process.env.PORT || 3001; // Railway injects PORT automatically
+const PORTAL_PASSWORD = process.env.PORTAL_PASSWORD || "RIFFWORLD";
+
+// ─── AUTH HELPER ───────────────────────────────────────────────────────────
+// Checks ?key=PASSWORD query param or Authorization: Bearer PASSWORD header.
+// Returns true if authorized, false (and sends 401) if not.
+function requireAuth(req, res) {
+  const urlObj = new URL(req.url, `http://localhost`);
+  const keyParam = urlObj.searchParams.get("key");
+  const authHeader = req.headers["authorization"] || "";
+  const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  if (keyParam === PORTAL_PASSWORD || bearerToken === PORTAL_PASSWORD) return true;
+  res.writeHead(401, { "Content-Type": "application/json", "WWW-Authenticate": "Bearer" });
+  res.end(JSON.stringify({ error: "Unauthorized" }));
+  return false;
+}
 
 // ─── SHOPIFY AUTH (direct Admin API token) ────────────────────────────────
 // Token is stored in .env as SHOPIFY_ACCESS_TOKEN_DE.
@@ -326,6 +341,46 @@ async function fetchExistingProducts() {
   return skuMap;
 }
 
+// ─── PRIMARY LOCATION ─────────────────────────────────────────────────────
+// Shopify multi-location: inventory must be set per-location via the
+// InventoryLevel API. We grab the first active location once and cache it.
+
+let _primaryLocationId = null;
+
+const PREFERRED_LOCATION_NAME = "6635 E Florence Ave";
+
+async function getPrimaryLocationId() {
+  if (_primaryLocationId) return _primaryLocationId;
+  const data = await shopifyGet("locations.json?active=true&limit=50");
+  const locs = data.locations || [];
+  if (locs.length === 0) throw new Error("No active Shopify locations found.");
+  // Prefer the named location; fall back to first active
+  const preferred = locs.find(l => l.name.includes(PREFERRED_LOCATION_NAME));
+  const loc = preferred || locs[0];
+  _primaryLocationId = loc.id;
+  console.log(`📍 Inventory location: "${loc.name}" (id ${_primaryLocationId})${preferred ? "" : " ⚠️ preferred location not found, using first active"}`);
+  return _primaryLocationId;
+}
+
+// ─── SET INVENTORY LEVEL AT PRIMARY LOCATION ──────────────────────────────
+
+async function setInventoryLevel(inventoryItemId, qty) {
+  if (!inventoryItemId) return;
+  const locationId = await getPrimaryLocationId();
+  await fetch(
+    `https://${SHOPIFY_STORE}/admin/api/2026-01/inventory_levels/set.json`,
+    {
+      method: "POST",
+      headers: await shopifyHeaders(),
+      body: JSON.stringify({
+        location_id: locationId,
+        inventory_item_id: inventoryItemId,
+        available: Number(qty) || 0,
+      }),
+    }
+  );
+}
+
 // ─── SET COUNTRY OF ORIGIN + HS CODE VIA INVENTORY ITEM ───────────────────
 // Shopify stores these on the InventoryItem, NOT the Variant.
 // Must use inventory_items/{id}.json endpoint.
@@ -434,11 +489,15 @@ async function doSync(onProgress) {
           },
         });
 
+        // Set inventory at the correct location (multi-location safe)
+        const qty = Number(f["qty ordered"] || 0);
+        await setInventoryLevel(inventoryItemId, qty);
+
         // Set country of origin + HS code on the InventoryItem (correct endpoint)
         await setOriginAndHsCode(inventoryItemId);
 
         updated++;
-        onProgress({ type: "success", message: `🔄 Updated: "${title}" — price $${price}, KR, HS 920710, tags: ${buildTags(f)}` });
+        onProgress({ type: "success", message: `🔄 Updated: "${title}" — price $${price}, qty ${qty}, KR, HS 920710` });
 
       } else {
         // ── CREATE new product ──────────────────────────────────────────
@@ -457,6 +516,10 @@ async function doSync(onProgress) {
             variant: { id: variantId, price },
           });
         }
+
+        // Set inventory at the correct location (multi-location safe)
+        const qty = Number(f["qty ordered"] || 0);
+        if (inventoryItemId) await setInventoryLevel(inventoryItemId, qty);
 
         // Set country of origin + HS code on the InventoryItem (correct endpoint)
         await setOriginAndHsCode(inventoryItemId);
@@ -485,6 +548,30 @@ async function doSync(onProgress) {
     }
   }
 
+  // ── Fix inventory_policy for dealer-preview products ──────────────────────
+  // Any active product tagged "dealer-preview" must allow checkout even at 0 qty.
+  onProgress({ type: "log", message: "🔍 Updating inventory policy for dealer-preview products..." });
+  try {
+    const previewResp = await shopifyGet(
+      `products.json?status=active&tag=dealer-preview&limit=250&fields=id,title,variants`
+    );
+    const previewProducts = previewResp.products || [];
+    for (const p of previewProducts) {
+      for (const v of p.variants || []) {
+        if (v.inventory_policy !== "continue") {
+          await shopifyPut(`variants/${v.id}.json`, {
+            variant: { id: v.id, inventory_policy: "continue" },
+          });
+          onProgress({ type: "log", message: `  📦 Set "continue selling" on: "${p.title}"` });
+        }
+      }
+      await new Promise((r) => setTimeout(r, 300));
+    }
+    onProgress({ type: "log", message: `✅ Dealer-preview policies updated (${previewProducts.length} product${previewProducts.length !== 1 ? "s" : ""})` });
+  } catch (err) {
+    onProgress({ type: "error", message: `⚠️ Could not update preview inventory policies: ${err.message}` });
+  }
+
   onProgress({
     type: "done",
     message: `🎉 Sync complete! ${created} created, ${updated} updated, ${failed} failed.`,
@@ -510,7 +597,8 @@ const server = http.createServer((req, res) => {
   }
 
   // ── Debug: list all Shopify DE collections ─────────────────────────────
-  if (req.method === "GET" && req.url === "/collections") {
+  if (req.method === "GET" && req.url.startsWith("/collections")) {
+    if (!requireAuth(req, res)) return;
     (async () => {
       try {
         const [custom, smart] = await Promise.all([
@@ -532,7 +620,8 @@ const server = http.createServer((req, res) => {
   }
 
   // ── Debug: dump Airtable field names ───────────────────────────────────
-  if (req.method === "GET" && req.url === "/fields") {
+  if (req.method === "GET" && req.url.startsWith("/fields")) {
+    if (!requireAuth(req, res)) return;
     (async () => {
       try {
         const records = await fetchAirtableRecords();
@@ -627,7 +716,8 @@ ${hasToken
   }
 
   // SSE endpoint: streams sync progress to the browser
-  if (req.method === "GET" && req.url === "/sync") {
+  if (req.method === "GET" && req.url.startsWith("/sync")) {
+    if (!requireAuth(req, res)) return;
     res.writeHead(200, {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
@@ -681,7 +771,8 @@ ${hasToken
   // ── Dealer products API ────────────────────────────────────────────────────
   // Returns active products grouped by model collection, filtered to inventory > 0.
   // Checks both "active" status and non-zero inventory_quantity on the first variant.
-  if (req.method === "GET" && req.url === "/api/dealer-products") {
+  if (req.method === "GET" && req.url.startsWith("/api/dealer-products")) {
+    if (!requireAuth(req, res)) return;
     // Allow CORS for local development
     res.setHeader("Access-Control-Allow-Origin", "*");
 
