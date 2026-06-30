@@ -471,13 +471,16 @@ async function doSync(onProgress) {
         // ── UPDATE existing product ─────────────────────────────────────
         const { productId, variantId, inventoryItemId } = existingProducts.get(sku);
 
-        // Update title, description, and tags (tags trigger smart collection membership)
+        // Update title, description, tags, and images
+        const photoField = f["color reference photo copy"] || f["color reference photo"] || [];
+        const images = photoField.map((att) => ({ src: att.url, alt: title }));
         await shopifyPut(`products/${productId}.json`, {
           product: {
             id: productId,
             title,
             body_html: buildProductDescription(f),
             tags: buildTags(f),
+            images,
           },
         });
 
@@ -497,7 +500,7 @@ async function doSync(onProgress) {
         await setOriginAndHsCode(inventoryItemId);
 
         updated++;
-        onProgress({ type: "success", message: `🔄 Updated: "${title}" — price $${price}, qty ${qty}, KR, HS 920710` });
+        onProgress({ type: "success", message: `🔄 Updated: "${title}" — price $${price}, qty ${qty}, images ${images.length}, KR, HS 920710` });
 
       } else {
         // ── CREATE new product ──────────────────────────────────────────
