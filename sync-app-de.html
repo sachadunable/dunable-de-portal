@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dunable DE — Shopify Sync</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f0f0f;
+      color: #e8e8e8;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      padding: 40px 20px;
+    }
+    .card {
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 10px;
+      padding: 32px;
+      width: 100%;
+      max-width: 680px;
+    }
+    .logo {
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #D85A30;
+      margin-bottom: 6px;
+    }
+    h1 {
+      font-size: 22px;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 4px;
+    }
+    .subtitle {
+      font-size: 13px;
+      color: #666;
+      margin-bottom: 28px;
+    }
+    .how-it-works {
+      background: #111;
+      border: 1px solid #222;
+      border-radius: 6px;
+      padding: 14px 16px;
+      font-size: 12px;
+      color: #888;
+      line-height: 1.7;
+      margin-bottom: 24px;
+    }
+    .how-it-works strong { color: #aaa; }
+    .btn {
+      width: 100%;
+      padding: 14px;
+      background: #D85A30;
+      color: #fff;
+      font-size: 15px;
+      font-weight: 700;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      letter-spacing: 0.03em;
+      transition: background 0.15s;
+    }
+    .btn:hover:not(:disabled) { background: #c04e27; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    #log {
+      margin-top: 24px;
+      background: #0a0a0a;
+      border: 1px solid #222;
+      border-radius: 6px;
+      padding: 16px;
+      font-family: "SF Mono", "Fira Code", Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.7;
+      max-height: 400px;
+      overflow-y: auto;
+      display: none;
+    }
+    .log-line { padding: 1px 0; }
+    .log-line.success { color: #4caf50; }
+    .log-line.error   { color: #f44336; }
+    .log-line.done    { color: #fff; font-weight: 700; margin-top: 8px; border-top: 1px solid #222; padding-top: 8px; }
+    .log-line.log     { color: #999; }
+    #summary {
+      display: none;
+      margin-top: 16px;
+      padding: 14px 16px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    #summary.ok  { background: #1a2e1a; border: 1px solid #2e5c2e; color: #4caf50; }
+    #summary.err { background: #2e1a1a; border: 1px solid #5c2e2e; color: #f44336; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">Dunable Guitars</div>
+    <h1>Airtable → Shopify DE Sync</h1>
+    <p class="subtitle">Push checked records from Airtable to dunable-de.com</p>
+
+    <div class="how-it-works">
+      <strong>How it works:</strong><br>
+      1. In Airtable, check the <strong>"Sync to Shopify DE"</strong> box on any DE model variant you want to push.<br>
+      2. Click Sync below — products are created as <strong>drafts</strong> in Shopify and added to their model collection.<br>
+      3. Already-synced products (matched by UPC) are skipped automatically.<br>
+      4. Go to Shopify admin to review and publish when ready.
+    </div>
+
+    <button class="btn" id="syncBtn" onclick="startSync()">
+      ▶ Sync Airtable → Shopify DE
+    </button>
+
+    <div id="log"></div>
+    <div id="summary"></div>
+  </div>
+
+  <script>
+    function startSync() {
+      const btn = document.getElementById("syncBtn");
+      const logEl = document.getElementById("log");
+      const summaryEl = document.getElementById("summary");
+
+      btn.disabled = true;
+      btn.textContent = "⏳ Syncing…";
+      logEl.style.display = "block";
+      logEl.innerHTML = "";
+      summaryEl.style.display = "none";
+
+      const es = new EventSource("/sync");
+
+      es.onmessage = function (e) {
+        const msg = JSON.parse(e.data);
+        const line = document.createElement("div");
+        line.className = "log-line " + (msg.type || "log");
+        line.textContent = msg.message;
+        logEl.appendChild(line);
+        logEl.scrollTop = logEl.scrollHeight;
+
+        if (msg.type === "done") {
+          es.close();
+          btn.disabled = false;
+          btn.textContent = "▶ Sync Airtable → Shopify DE";
+
+          summaryEl.style.display = "block";
+          if (msg.failed > 0) {
+            summaryEl.className = "err";
+            summaryEl.textContent = `⚠️ ${msg.created} created, ${msg.failed} failed. Check the log above.`;
+          } else {
+            summaryEl.className = "ok";
+            summaryEl.textContent = `✅ ${msg.created} product${msg.created !== 1 ? "s" : ""} synced to Shopify DE.`;
+          }
+        }
+      };
+
+      es.onerror = function () {
+        es.close();
+        btn.disabled = false;
+        btn.textContent = "▶ Sync Airtable → Shopify DE";
+        const line = document.createElement("div");
+        line.className = "log-line error";
+        line.textContent = "❌ Connection lost. Check that the server is running.";
+        logEl.appendChild(line);
+      };
+    }
+  </script>
+</body>
+</html>
