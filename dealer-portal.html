@@ -152,6 +152,11 @@
       font-size: 9.5px; font-weight: 700; letter-spacing: 0.07em;
       border-radius: 3px; text-transform: uppercase; margin-bottom: 5px;
     }
+    .badge-restocked {
+      display: inline-block; padding: 2px 7px; background: var(--orange); color: #000;
+      font-size: 9.5px; font-weight: 700; letter-spacing: 0.07em;
+      border-radius: 3px; text-transform: uppercase; margin-bottom: 5px;
+    }
     .row-preview td { background: rgba(124,58,237,0.04) !important; }
     .row-preview:hover td { background: rgba(124,58,237,0.07) !important; }
     .product-name { font-weight: 500; line-height: 1.45; color: var(--text); }
@@ -603,6 +608,7 @@
 
     const newBadge  = p.isPreview
       ? `<div class="badge-preview">⬡ Dealer Preview</div>`
+      : p.isRestocked ? `<div class="badge-restocked">↩ Restocked</div>`
       : (p.isNew ? `<div class="badge-new">New</div>` : '');
     const stockHtml = isLow
       ? `<span class="stock-num stock-low">${p.inventoryQty}<span class="stock-warn">low stock</span></span>`

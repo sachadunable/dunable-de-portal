@@ -845,9 +845,10 @@ ${hasToken
             if (tags.includes(tag)) { collection = name; break; }
           }
 
-          // Is it new? (created within last 120 days)
+          // Is it new? tag override or date-based (created within last 120 days)
           const createdMs = new Date(p.created_at).getTime();
-          const isNew = (nowMs - createdMs) < NEW_CUTOFF_DAYS * 24 * 60 * 60 * 1000;
+          const isNew = tags.includes("dealer-new") || (nowMs - createdMs) < NEW_CUTOFF_DAYS * 24 * 60 * 60 * 1000;
+          const isRestocked = tags.includes("dealer-restocked");
 
           // Images (all of them)
           const images = (p.images || []).map(img => img.src);
@@ -864,6 +865,7 @@ ${hasToken
             price:        Number(variant.price || 0),
             inventoryQty: qty,
             isNew,
+            isRestocked,
             isPreview:    !!p._isPreview,
             isLowStock:   qty <= LOW_STOCK_THRESHOLD,
           };
